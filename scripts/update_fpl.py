@@ -360,6 +360,7 @@ def main():
     details = cache['details']
     live_cache, warnings, managers = {}, [], []
     latest = max(completed_ids, default=0)
+    active = next((e for e in bootstrap['events'] if e['is_current']), None)
     for s in standings:
         entry = s['entry']
         print(f"Updating {s['entry_name']} ({entry})", flush=True)
@@ -407,16 +408,19 @@ def main():
             except Exception:
                 warnings.append(f'Public squad unavailable for {s["entry_name"]}.')
         public_team = None
-        if public_gw:
-            team_detail = details.get(f'{entry}:{public_gw}', {})
+        team_gw = max(public_gw, active['id'] if active else 0)
+        if team_gw:
+            team_detail = details.get(f'{entry}:{team_gw}', {})
             try:
-                if public_gw not in completed_ids or not team_detail.get('lineup'):
-                    picks = fetch(f'entry/{entry}/event/{public_gw}/picks/')
-                    if public_gw not in live_cache:
-                        live_data = fetch(f'event/{public_gw}/live/')
-                        live_cache[public_gw] = {p['id']: p['stats']['total_points'] for p in live_data['elements']}
-                    team_detail = squad_detail(picks, live_cache[public_gw], players)
-                public_team = team_view(team_detail, elements, teams, live_cache.get(public_gw, {}), public_gw, public_gw in completed_ids)
+                if team_gw not in completed_ids or not team_detail.get('lineup'):
+                    picks = fetch(f'entry/{entry}/event/{team_gw}/picks/')
+                    if team_gw not in live_cache:
+                        live_data = fetch(f'event/{team_gw}/live/')
+                        live_cache[team_gw] = {p['id']: p['stats']['total_points'] for p in live_data['elements']}
+                    team_detail = squad_detail(picks, live_cache[team_gw], players)
+                public_team = team_view(team_detail, elements, teams, live_cache.get(team_gw, {}), team_gw, team_gw in completed_ids)
+                if public_team:
+                    public_team['entry_history'] = picks.get('entry_history', {}) if team_gw not in completed_ids else latest_history
             except Exception:
                 warnings.append(f'Public team details unavailable for {s["entry_name"]}.')
         mvp, mvp_coverage = manager_mvp(rows, details, entry, elements, teams)
@@ -457,11 +461,20 @@ def main():
         if m.get('ft_gw'):
             m['overall_movement_gw'] = m['ft_gw'] - 1
     try:
-        fixture_kickoffs = [f['kickoff_time'] for f in fetch('fixtures/') if f.get('kickoff_time')]
+        fixtures = fetch('fixtures/')
+        fixture_kickoffs = [f['kickoff_time'] for f in fixtures if f.get('kickoff_time')]
+        live_fixtures = [{'id': f['id'], 'gw': f.get('event'), 'home': teams.get(f['team_h'], '?'),
+                          'away': teams.get(f['team_a'], '?'), 'home_score': f.get('team_h_score'),
+                          'away_score': f.get('team_a_score'), 'started': f.get('started', False),
+                          'finished': f.get('finished', False), 'kickoff': f.get('kickoff_time')}
+                         for f in fixtures if active and f.get('event') == active['id']]
+        fixtures_stale = False
     except Exception:
         prior_path = ROOT / 'data/league.json'
         prior = json.loads(prior_path.read_text()) if prior_path.exists() else {}
         fixture_kickoffs = prior.get('fixture_kickoffs', [])
+        live_fixtures = prior.get('live_fixtures', [])
+        fixtures_stale = True
         warnings.append('Fixture refresh failed; previous matchday schedule retained.')
     creators = None
     try:
@@ -480,8 +493,10 @@ def main():
             'latest_completed': latest or None, 'completed_count': len(completed),
             'total_gameweeks': len(bootstrap['events']),
             'current_gw': active['id'] if active else None,
+            'current_deadline': active['deadline_time'] if active else None,
             'in_progress': bool(active and active['id'] not in completed_ids),
             'regrets': regrets, 'prices': price_watch(bootstrap), 'refresh_minutes_matchday': config.get('matchday_minutes', 15),
+            'live_fixtures': live_fixtures, 'fixtures_stale': fixtures_stale,
             'fixture_kickoffs': fixture_kickoffs, 'prizes': prizes, 'creators': creators,
             'warnings': warnings, 'managers': managers, 'gameweeks': gameweeks, 'months': monthly}
     write_json(ROOT / 'data/league.json', data)
