@@ -62,6 +62,7 @@ def main():
     last_details = 0
     squads, ranks = {}, {}
     failures = 0
+    first_publish = True
     while time.monotonic() < until:
         tick = time.monotonic()
         now = datetime.now(timezone.utc)
@@ -108,10 +109,12 @@ def main():
             write_json(LIVE / 'data/live.json', snapshot)
             # A rotating path avoids the raw-file CDN's five-minute cached copy.
             slot = int(datetime.now(timezone.utc).timestamp() // 60) % 10
-            write_json(LIVE / f'data/live-{slot}.json', snapshot)
+            for target in (range(10) if first_publish else [slot]):
+                write_json(LIVE / f'data/live-{target}.json', snapshot)
             git('-C', str(LIVE), 'add', 'data')
             git('-C', str(LIVE), 'commit', '-m', 'Update matchday scores')
             git('-C', str(LIVE), 'push', 'origin', 'HEAD:refs/heads/live-data')
+            first_publish = False
             failures = 0
             print('Published live scores: ' + snapshot['updated_at'], flush=True)
         except Exception as exc:

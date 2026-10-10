@@ -335,7 +335,9 @@ async function load(silent=false){
  refreshPending=(async()=>{try{
  const stamp=Math.floor(Date.now()/30000);
  const slot=(Math.floor(Date.now()/60000)-1)%10;
- const results=await Promise.allSettled([fetchSnapshot('./data/league.json?t='+stamp),fetchSnapshot('https://raw.githubusercontent.com/avgcloudwizard/wireless/live-data/data/live-'+slot+'.json?t='+stamp)]);
+ const day=new Date(Date.now()+330*60000).getUTCDay();
+ const liveFile=day===0||day===6?'live-'+slot+'.json':'live.json';
+ const results=await Promise.allSettled([fetchSnapshot('./data/league.json?t='+stamp),fetchSnapshot('https://raw.githubusercontent.com/avgcloudwizard/wireless/live-data/data/'+liveFile+'?t='+stamp)]);
  if(results[0].status==='fulfilled'){const next=results[0].value;if(Array.isArray(next.managers)&&Array.isArray(next.gameweeks)&&(!baseSnapshot||Date.parse(next.updated_at)>=Date.parse(baseSnapshot.updated_at)))baseSnapshot=next;}
  if(results[1].status==='fulfilled'){const next=results[1].value;if(!liveSnapshot||Date.parse(next.updated_at)>=Date.parse(liveSnapshot.updated_at))liveSnapshot=next;}
  if(!baseSnapshot)throw new Error('Snapshot unavailable');
