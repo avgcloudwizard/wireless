@@ -1,6 +1,6 @@
 'use strict';
 let data;
-let openTeamId=null, refreshPending=null;
+let openTeamId=null, refreshPending=null, baseSnapshot=null, liveSnapshot=null;
 let creatorQuery = "", rainPaused = false;
 let gwSelection, monthSelection, priceManagerSelection;
 const $ = s => document.querySelector(s);
@@ -108,7 +108,7 @@ function drama(){
  const week=liveWeek(),ms=week?.rows||[], fixtures=(data.live_fixtures||[]).filter(f=>f.gw===data.current_gw);
  const current=fixtures.filter(f=>f.started&&!f.finished);
  return heading('Live drama','The scores, the armbands, the changing mood.',`<span class="pill"><i></i>GW ${data.current_gw||'—'} · ${current.length?'Matches in progress':data.in_progress?'Gameweek in progress':'Latest results'}</span>`)+
- `<p class="source-note">Snapshot: ${new Date(data.updated_at).toLocaleString()}. Matchday refreshes aim for every 15 minutes; GitHub can delay updates. Points, bonus and autosubs remain provisional until FPL finalises them.</p>`+
+ `<p class="source-note">Snapshot: ${new Date(data.updated_at).toLocaleString()}. Live scores aim to refresh every minute during Saturday/Sunday matches, and every 15 minutes on other matchdays. Startup and FPL delays are possible. Official overall ranks refresh separately, roughly every 15 minutes. Points, bonus and autosubs remain provisional until FPL finalises them.</p>`+
  `<div class="cards">${fixtures.map(f=>`<article class="stat-card"><p class="label">${f.finished?'FULL TIME':f.started?'IN PLAY':f.kickoff?new Date(f.kickoff).toLocaleString(): 'KICKOFF TBC'}</p><p class="stat">${esc(f.home)} ${f.started?`${num(f.home_score)} – ${num(f.away_score)}`:'v'} ${esc(f.away)}</p></article>`).join('')}</div>${data.fixtures_stale?'<p class="notice">Match scores could not refresh. Showing the last saved fixtures.</p>':''}`+
  `<section class="section panel"><div class="panel-heading"><h2>The league right now</h2><span class="subtext">${ms.length} / ${data.managers.length} squads updated</span></div>${ms.length?table(['GW pos','Manager / team','GW points','Captain','Captain pts','Hit cost','Provisional total','View team'],ms.map(m=>row([cell(medal(m.gw_rank)),cell(person(m)),cell(num(m.net),'total'),cell(esc(m.captain||'—')),cell(num(m.captain_points)),cell(num(m.hits)),cell(num(m.total)),cell(`<button class="action-button" data-team="${m.id}">View GW${week.id} team</button>`)]))):empty(data.in_progress?'The current team sheets are being refreshed. Check back shortly.':'No Gameweek is currently in progress.')}<p class="table-note">GW points include captain multipliers and deduct transfer hits. Totals add these provisional points to the previous completed GW. This is a snapshot, not a minute-by-minute feed.</p></section>`;
 }
@@ -286,7 +286,7 @@ function enemies(){
 
 function render(){if(!data)return;const route=location.hash.slice(1)||'home';const pages={home,season,drama,gameweeks,monthly,predictions,prices,creators,enemies,untouched,maccapanti,money};const active=pages[route]?route:'home';document.querySelectorAll('[data-nav]').forEach(a=>{a.classList.toggle('active',a.dataset.nav===active);if(a.dataset.nav===active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
  let notice=data.in_progress?`<div class="notice">Gameweek ${data.current_gw} is in progress or awaiting final checks. Current standings may be provisional; season records stop at GW ${data.latest_completed||'—'}.</div>`:'';
- if(Date.now()-new Date(data.updated_at).getTime()>18*3600000)notice+='<div class="notice">The latest refresh is delayed. Showing the last successful snapshot.</div>';
+ if(Date.now()-new Date(data.updated_at).getTime()>(data.in_progress?5*60000:18*3600000))notice+='<div class="notice">Updates are delayed. Showing the last successful scores; check the timestamp below.</div>';
  if(data.warnings.length)notice+='<div class="notice">Some data could not be refreshed. Previous values are retained where possible; missing values are unavailable. Check the snapshot time shown in each section.</div>';
  $('#content').innerHTML=`<div class="fade">${notice}${pages[active]()}</div>`;
  document.title=`${active==='home'?data.name:active==='drama'?'Live drama':active==='creators'?'Content Creators':active==='enemies'?'Who Owns':active==='money'?'Money follows':active==='untouched'?'UnTouched':active==='maccapanti'?'MaccaPanti':active[0].toUpperCase()+active.slice(1)} · Wireless`;
@@ -318,22 +318,36 @@ $('#profile .close').addEventListener('click',()=>$('#profile').close());
 $('#profile').addEventListener('click',e=>{if(e.target===$('#profile')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
 window.addEventListener('hashchange',()=>{if(location.hash==='#content'){document.querySelector('main').focus();return;}render();window.scrollTo(0,0);});
 document.addEventListener('error',event=>{if(event.target.matches?.('.player-photo'))event.target.hidden=true;},true);
+function applyLive(base,live){
+ const merged=structuredClone(base);
+ if(!live||live.league_id!==base.league_id||live.season!==base.season||live.gw<=base.latest_completed||Date.parse(live.updated_at)<=Date.parse(base.updated_at))return merged;
+ if(!Array.isArray(live.managers)||live.managers.length!==base.managers.length||!base.managers.every(m=>live.managers.some(r=>r.id===m.id&&r.public_team?.gw===live.gw&&r.public_team.players?.length===15)))return merged;
+ merged.snapshot_updated_at=base.updated_at;merged.updated_at=live.updated_at;merged.live_interval=live.interval_seconds;
+ merged.current_gw=live.gw;merged.current_deadline=live.deadline;merged.in_progress=true;
+ merged.live_fixtures=live.fixtures;merged.fixtures_stale=false;
+ merged.managers=base.managers.map(m=>{const r=live.managers.find(r=>r.id===m.id);return {...m,public_team:r.public_team,total:r.total,event_total:r.event_total,...(r.official_rank?.value?{live_rank:r.official_rank.value,rank_updated_at:r.official_rank.updated_at}:{})};});
+ const ranked=[...merged.managers].sort((a,b)=>b.total-a.total);ranked.forEach((m,i)=>{m.rank=i&&m.total===ranked[i-1].total?ranked[i-1].rank:i+1;m.movement=null;});
+ return merged;
+}
+async function fetchSnapshot(url){const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(12000)});if(!response.ok)throw new Error('Snapshot unavailable');return response.json();}
 async function load(silent=false){
  if(refreshPending)return refreshPending;
  refreshPending=(async()=>{try{
- const response=await fetch('./data/league.json?t='+Math.floor(Date.now()/60000),{cache:'no-store'});
- if(!response.ok)throw new Error('Snapshot unavailable');
- const next=await response.json();if(!Array.isArray(next.managers)||!Array.isArray(next.gameweeks))throw new Error('Invalid snapshot');
- if(data?.updated_at===next.updated_at)return;
- if(data&&Date.parse(next.updated_at)<Date.parse(data.updated_at))return;
+ const stamp=Math.floor(Date.now()/30000);
+ const results=await Promise.allSettled([fetchSnapshot('./data/league.json?t='+stamp),fetchSnapshot('https://raw.githubusercontent.com/avgcloudwizard/wireless/live-data/data/live.json?t='+stamp)]);
+ if(results[0].status==='fulfilled'){const next=results[0].value;if(Array.isArray(next.managers)&&Array.isArray(next.gameweeks)&&(!baseSnapshot||Date.parse(next.updated_at)>=Date.parse(baseSnapshot.updated_at)))baseSnapshot=next;}
+ if(results[1].status==='fulfilled'){const next=results[1].value;if(!liveSnapshot||Date.parse(next.updated_at)>=Date.parse(liveSnapshot.updated_at))liveSnapshot=next;}
+ if(!baseSnapshot)throw new Error('Snapshot unavailable');
+ const next=applyLive(baseSnapshot,liveSnapshot);
+ if(data?.updated_at===next.updated_at&&data?.snapshot_updated_at===next.snapshot_updated_at)return;
  data=next;render();
  if($('#profile').open&&openTeamId!==null)showTeam(openTeamId,false);
- $('#updated').textContent=`Last updated: ${new Date(data.updated_at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})} · Matchdays ~15 min · Otherwise 6 hours`;
+ $('#updated').textContent=`Scores updated: ${new Date(data.updated_at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})} · Weekend live scores ~1 min · Official ranks/full stats may lag`;
  }catch(error){if(data)return;$('#content').innerHTML=empty('The league snapshot could not be loaded. <button id="retry">Try again</button>');$('#retry').addEventListener('click',()=>load());console.error(error);}})();
  try{await refreshPending;}finally{refreshPending=null;}
 }
 function refreshVisible(){if(!document.hidden&&!['creator-search','enemy-search','price-search','personal-manager','hindsight-player'].includes(document.activeElement?.id))load(true);}
 load();
-setInterval(refreshVisible,60000);
+setInterval(refreshVisible,30000);
 document.addEventListener('visibilitychange',refreshVisible);
 window.addEventListener('focus',refreshVisible);

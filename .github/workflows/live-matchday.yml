@@ -1,0 +1,22 @@
+name: Live matchday scores
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Update FPL and publish site]
+    types: [completed]
+  schedule:
+    - cron: '3,33 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: live-matchday
+  cancel-in-progress: false
+jobs:
+  live:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 335
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep matchday scores fresh
+        run: python3 scripts/live_matchday.py
