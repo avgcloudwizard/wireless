@@ -286,7 +286,7 @@ function enemies(){
 
 function render(){if(!data)return;const route=location.hash.slice(1)||'home';const pages={home,season,drama,gameweeks,monthly,predictions,prices,creators,enemies,untouched,maccapanti,money};const active=pages[route]?route:'home';document.querySelectorAll('[data-nav]').forEach(a=>{a.classList.toggle('active',a.dataset.nav===active);if(a.dataset.nav===active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
  let notice=data.in_progress?`<div class="notice">Gameweek ${data.current_gw} is in progress or awaiting final checks. Current standings may be provisional; season records stop at GW ${data.latest_completed||'—'}.</div>`:'';
- if(Date.now()-new Date(data.updated_at).getTime()>(data.in_progress?5*60000:18*3600000))notice+='<div class="notice">Updates are delayed. Showing the last successful scores; check the timestamp below.</div>';
+ if(Date.now()-new Date(data.updated_at).getTime()>(data.in_progress?Math.max(5*60000,(data.live_interval||900)*2000):18*3600000))notice+='<div class="notice">Updates are delayed. Showing the last successful scores; check the timestamp below.</div>';
  if(data.warnings.length)notice+='<div class="notice">Some data could not be refreshed. Previous values are retained where possible; missing values are unavailable. Check the snapshot time shown in each section.</div>';
  $('#content').innerHTML=`<div class="fade">${notice}${pages[active]()}</div>`;
  document.title=`${active==='home'?data.name:active==='drama'?'Live drama':active==='creators'?'Content Creators':active==='enemies'?'Who Owns':active==='money'?'Money follows':active==='untouched'?'UnTouched':active==='maccapanti'?'MaccaPanti':active[0].toUpperCase()+active.slice(1)} · Wireless`;
@@ -334,7 +334,8 @@ async function load(silent=false){
  if(refreshPending)return refreshPending;
  refreshPending=(async()=>{try{
  const stamp=Math.floor(Date.now()/30000);
- const results=await Promise.allSettled([fetchSnapshot('./data/league.json?t='+stamp),fetchSnapshot('https://raw.githubusercontent.com/avgcloudwizard/wireless/live-data/data/live.json?t='+stamp)]);
+ const slot=(Math.floor(Date.now()/60000)-1)%10;
+ const results=await Promise.allSettled([fetchSnapshot('./data/league.json?t='+stamp),fetchSnapshot('https://raw.githubusercontent.com/avgcloudwizard/wireless/live-data/data/live-'+slot+'.json?t='+stamp)]);
  if(results[0].status==='fulfilled'){const next=results[0].value;if(Array.isArray(next.managers)&&Array.isArray(next.gameweeks)&&(!baseSnapshot||Date.parse(next.updated_at)>=Date.parse(baseSnapshot.updated_at)))baseSnapshot=next;}
  if(results[1].status==='fulfilled'){const next=results[1].value;if(!liveSnapshot||Date.parse(next.updated_at)>=Date.parse(liveSnapshot.updated_at))liveSnapshot=next;}
  if(!baseSnapshot)throw new Error('Snapshot unavailable');

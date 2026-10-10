@@ -144,3 +144,9 @@ Monthly Fraud of the Month uses the lowest net monthly points, sharing ties. In 
 These pages use only public FPL data. Historical player scores are cached, with the most recent completed week refreshed each run and older scores revisited weekly. A failed regret refresh keeps its previous snapshot and shows a delay notice. New transfers and squads remain private until FPL publishes them after the deadline.
 
 Frozen table position ranks all frozen teams against each other.
+
+
+### Weekend live scores
+“Live matchday scores” is a separate GitHub Action. During live or imminent matches it stays running for up to 5 hours 20 minutes, updating public squad scores every minute on Saturdays and Sundays (India time), and every 15 minutes on other days. It stops when no match is live or starting within 30 minutes. Automatic half-hour checks and completed full refreshes start it again when needed. GitHub can delay the initial start; you can start it yourself under Actions → Live matchday scores → Run workflow.
+
+The website reads small JSON files from this public repository’s `live-data` branch. Ten rotating files avoid GitHub’s five-minute raw-file cache; the browser checks the previous minute’s slot every 30 seconds. Allow roughly 1–2 minutes for scores to appear. No FPL browser requests, tokens, paid services or billing account are needed. Official overall ranks and squad multipliers refresh about every 15 minutes and can lag until FPL updates them; completed-season statistics use the full refresh. If an update fails, the last successful data stays available with its timestamp.

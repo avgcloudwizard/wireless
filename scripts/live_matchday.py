@@ -106,7 +106,10 @@ def main():
                         'deadline': event['deadline_time'], 'updated_at': datetime.now(timezone.utc).isoformat(),
                         'interval_seconds': interval(now), 'managers': managers, 'fixtures': current_fixtures}
             write_json(LIVE / 'data/live.json', snapshot)
-            git('-C', str(LIVE), 'add', 'data/live.json')
+            # A rotating path avoids the raw-file CDN's five-minute cached copy.
+            slot = int(datetime.now(timezone.utc).timestamp() // 60) % 10
+            write_json(LIVE / f'data/live-{slot}.json', snapshot)
+            git('-C', str(LIVE), 'add', 'data')
             git('-C', str(LIVE), 'commit', '-m', 'Update matchday scores')
             git('-C', str(LIVE), 'push', 'origin', 'HEAD:refs/heads/live-data')
             failures = 0
