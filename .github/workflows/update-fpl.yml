@@ -2,7 +2,11 @@ name: Update FPL and publish site
 
 on:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    # Separate quarter-hour triggers, offset from the busy hour boundary.
+    - cron: '11 * * * *'
+    - cron: '26 * * * *'
+    - cron: '41 * * * *'
+    - cron: '56 * * * *'
   workflow_dispatch:
   push:
     branches: [main]
