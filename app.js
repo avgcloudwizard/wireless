@@ -104,13 +104,21 @@ function liveWeek(){
  rows.sort((a,b)=>b.net-a.net);rows.forEach((r,i)=>r.gw_rank=i&&r.net===rows[i-1].net?rows[i-1].gw_rank:i+1);
  return {id:data.current_gw,provisional:true,deadline:data.current_deadline||data.updated_at,rows};
 }
+function yetToPlay(manager,fixtures){
+ const team=manager.public_team;
+ if(!team?.players?.length||team.gw!==data.current_gw||team.stale||data.fixtures_stale||!fixtures.length)return null;
+ return team.players.filter(p=>p.slot<=11).reduce((count,p)=>{
+ const remaining=fixtures.some(f=>!f.started&&!f.finished&&(f.home===p.team||f.away===p.team));
+ return count+(remaining?(p.captain||p.multiplier>1?2:1):0);
+ },0);
+}
 function drama(){
  const week=liveWeek(),ms=week?.rows||[], fixtures=(data.live_fixtures||[]).filter(f=>f.gw===data.current_gw);
  const current=fixtures.filter(f=>f.started&&!f.finished);
  return heading('Live drama','The scores, the armbands, the changing mood.',`<span class="pill"><i></i>GW ${data.current_gw||'—'} · ${current.length?'Matches in progress':data.in_progress?'Gameweek in progress':'Latest results'}</span>`)+
  `<p class="source-note">Snapshot: ${new Date(data.updated_at).toLocaleString()}. Live scores aim to refresh every minute during Saturday/Sunday matches, and every 15 minutes on other matchdays. Startup and FPL delays are possible. Official overall ranks refresh separately, roughly every 15 minutes. Points, bonus and autosubs remain provisional until FPL finalises them.</p>`+
  `<div class="cards">${fixtures.map(f=>`<article class="stat-card"><p class="label">${f.finished?'FULL TIME':f.started?'IN PLAY':f.kickoff?new Date(f.kickoff).toLocaleString(): 'KICKOFF TBC'}</p><p class="stat">${esc(f.home)} ${f.started?`${num(f.home_score)} – ${num(f.away_score)}`:'v'} ${esc(f.away)}</p></article>`).join('')}</div>${data.fixtures_stale?'<p class="notice">Match scores could not refresh. Showing the last saved fixtures.</p>':''}`+
- `<section class="section panel"><div class="panel-heading"><h2>The league right now</h2><span class="subtext">${ms.length} / ${data.managers.length} squads updated</span></div>${ms.length?table(['GW pos','Manager / team','GW points','Captain','Captain pts','Hit cost','Provisional total','View team'],ms.map(m=>row([cell(medal(m.gw_rank)),cell(person(m)),cell(num(m.net),'total'),cell(esc(m.captain||'—')),cell(num(m.captain_points)),cell(num(m.hits)),cell(num(m.total)),cell(`<button class="action-button" data-team="${m.id}">View GW${week.id} team</button>`)]))):empty(data.in_progress?'The current team sheets are being refreshed. Check back shortly.':'No Gameweek is currently in progress.')}<p class="table-note">GW points include captain multipliers and deduct transfer hits. Totals add these provisional points to the previous completed GW. This is a snapshot, not a minute-by-minute feed.</p></section>`;
+ `<section class="section panel"><div class="panel-heading"><h2>The league right now</h2><span class="subtext">${ms.length} / ${data.managers.length} squads updated</span></div>${ms.length?table(['GW pos','Manager / team','GW points','Yet to play','Captain','Captain pts','Hit cost','Provisional total','View team'],ms.map(m=>row([cell(medal(m.gw_rank)),cell(person(m)),cell(num(m.net),'total'),cell(yetToPlay(m,fixtures)==null?'—':yetToPlay(m,fixtures)+'/12','numeric',yetToPlay(m,fixtures)??''),cell(esc(m.captain||'—')),cell(num(m.captain_points)),cell(num(m.hits)),cell(num(m.total)),cell(`<button class="action-button" data-team="${m.id}">View GW${week.id} team</button>`)]))):empty(data.in_progress?'The current team sheets are being refreshed. Check back shortly.':'No Gameweek is currently in progress.')}<p class="table-note">Yet to play counts starting XI players whose team still has a fixture to kick off this GW; captain counts twice (also on Triple Captain), out of 12. Bench players are excluded, including on Bench Boost. GW points include captain multipliers and deduct transfer hits. Totals add these provisional points to the previous completed GW. This is a snapshot, not a minute-by-minute feed.</p></section>`;
 }
 
 function gameweeks() {
