@@ -20,3 +20,15 @@ assert.equal(updated.receipts[0].gw,gw);assert.equal(updated.receipts[1].delta,3
 assert.equal(ctx.saved.receipts[0].delta,4,'Does not mutate completed dataset');
 team.chip='wildcard';assert.equal(vm.runInContext('transferText(m)',ctx),'Wildcard');assert.equal(vm.runInContext('currentRegrets(m,saved).receipts.length',ctx),1);
 console.log('All 12 pages render; current scores, month, value and transfer receipts checked.');
+// Season adds the provisional GW exactly once and leaves stored records untouched.
+ctx.snapshot=JSON.parse(fs.readFileSync('data/league.json'));vm.runInContext('data=snapshot',ctx);
+if(ctx.snapshot.in_progress){
+ const week=vm.runInContext('liveWeek()',ctx),updated=vm.runInContext('seasonManagers()',ctx);
+ for(const m of ctx.snapshot.managers){const live=week.rows.find(r=>r.id===m.id),s=updated.find(r=>r.id===m.id);if(!live)continue;
+  assert.equal(s.bench,m.bench+live.bench);assert.equal(s.hits,m.hits+live.hits);assert.equal(s.wins,m.wins+(live.gw_rank===1?1:0));
+  assert.equal(s.latest_score,live.net);assert(s.power>=0&&s.power<=100);
+ }
+ assert.equal(JSON.stringify(vm.runInContext('seasonManagers()',ctx)),JSON.stringify(updated),'Repeated renders do not accumulate the live GW');
+ assert(vm.runInContext('season()',ctx).includes('GW '+ctx.snapshot.current_gw+' live'));
+}
+console.log('Season live totals are repeatable; historical data stays unchanged.');

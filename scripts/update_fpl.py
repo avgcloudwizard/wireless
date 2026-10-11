@@ -134,7 +134,7 @@ def price_watch(bootstrap):
     return {'players': result, 'deadline': deadlines[0] if deadlines else None,
             'source_updated_at': config.get('status', {}).get('price_change_last_updated')}
 
-def manager_mvp(history, details, entry, elements, teams):
+def manager_mvp(history, details, entry, elements, teams, all_players=False):
     totals, coverage = {}, 0
     for row in history:
         points = details.get(f"{entry}:{row['gw']}", {}).get('player_points')
@@ -148,7 +148,7 @@ def manager_mvp(history, details, entry, elements, teams):
         return [], coverage
     highest = max(totals.values())
     return [{**player_info(elements[p], teams), 'points': points}
-            for p, points in sorted(totals.items()) if points == highest and p in elements], coverage
+            for p, points in sorted(totals.items()) if (all_players or points == highest) and p in elements], coverage
 
 def scoring_awards(history, details, entry):
     failures, hauls, coverage = [], 0, 0
@@ -458,6 +458,7 @@ def main():
                          'squad': squad, 'squad_gw': squad_gw or None,
                          'squad_restored': chips.get(public_gw) == 'freehit',
                          'mvp': mvp, 'mvp_coverage': mvp_coverage,
+                         'player_totals': manager_mvp(rows, details, entry, elements, teams, True)[0],
                          'public_team': public_team,
                          **scoring_awards(rows, details, entry),
                          **comparison_history(history['current'], chips),
