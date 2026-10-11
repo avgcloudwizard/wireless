@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from update_fpl import fetch, squad_detail, team_view, write_json
+from update_fpl import fetch, squad_detail, team_view, write_json, transfer_moves
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE = ROOT / '.live'
@@ -22,8 +22,8 @@ def match_window(fixtures, now):
         if f.get('finished') or not f.get('kickoff_time'):
             continue
         kickoff = datetime.fromisoformat(f['kickoff_time'].replace('Z', '+00:00'))
-        # Stay awake shortly before kickoff; cap stale/unclosed fixtures at 4h.
-        if kickoff - timedelta(minutes=30) <= now <= kickoff + timedelta(hours=4):
+        # Only genuinely started matches; cap stale/unclosed fixtures at 4h.
+        if f.get('started') and kickoff <= now <= kickoff + timedelta(hours=4):
             return True
     return False
 
@@ -63,14 +63,27 @@ def main():
     squads, ranks = {}, {}
     failures = 0
     first_publish = True
+    was_live = False
+    moves_cache = {}
     while time.monotonic() < until:
         tick = time.monotonic()
         now = datetime.now(timezone.utc)
         try:
             fixtures = fetch('fixtures/')
-            if not match_window(fixtures, now):
-                print('No live or imminent match. Worker finished.', flush=True)
+            running = match_window(fixtures, now)
+            stopping = was_live and not running
+            if not running and not stopping:
+                upcoming = [datetime.fromisoformat(f['kickoff_time'].replace('Z', '+00:00')) for f in fixtures
+                            if not f.get('finished') and not f.get('started') and f.get('kickoff_time')]
+                nearby = [k for k in upcoming if now - timedelta(minutes=30) <= k <= now + timedelta(hours=1)]
+                if nearby:
+                    # Wake for kickoff, but do not refresh or publish scores beforehand.
+                    delay = max(15, min(300, (min(nearby) - now).total_seconds()))
+                    time.sleep(delay)
+                    continue
+                print('No live or nearby match. Worker finished.', flush=True)
                 return
+            was_live = running
             if not squads or tick - last_details >= 900:
                 bootstrap = fetch('bootstrap-static/')
                 event = next(e for e in bootstrap['events'] if e['is_current'])
@@ -87,6 +100,10 @@ def main():
                     squad['entry_history'] = picks['entry_history']
                     squads[m['id']] = squad
                     try:
+                        transfer_moves(m['id'], event['id'], elements, moves_cache)
+                    except Exception:
+                        pass
+                    try:
                         entry = fetch(f"entry/{m['id']}/")
                         ranks[m['id']] = {'value': entry.get('summary_overall_rank'), 'updated_at': datetime.now(timezone.utc).isoformat()}
                     except Exception:
@@ -98,14 +115,22 @@ def main():
             for m in base['managers']:
                 team, gross, total = score_team(squads[m['id']], points)
                 managers.append({'id': m['id'], 'public_team': team, 'event_total': gross,
-                                 'total': total, 'official_rank': ranks.get(m['id'])})
+                                 'total': total, 'official_rank': ranks.get(m['id']),
+                                 'transfer_moves': moves_cache.get(f"{m['id']}:{event['id']}", m.get('transfer_moves'))})
+            creators = []
+            for m in base.get('creators', {}).get('managers', []):
+                squad = m.get('public_team') or {}
+                if squad.get('gw') == event['id'] and squad.get('entry_history') and not squad.get('stale'):
+                    team, gross, total = score_team(squad, points)
+                    creators.append({'id': m['id'], 'public_team': team, 'event_total': gross, 'total': total})
             current_fixtures = [{'id': f['id'], 'gw': f['event'], 'home': teams[f['team_h']], 'away': teams[f['team_a']],
                                  'home_score': f.get('team_h_score'), 'away_score': f.get('team_a_score'),
                                  'started': f.get('started', False), 'finished': f.get('finished', False),
                                  'kickoff': f.get('kickoff_time')} for f in fixtures if f.get('event') == event['id']]
             snapshot = {'league_id': base['league_id'], 'season': base['season'], 'gw': event['id'],
                         'deadline': event['deadline_time'], 'updated_at': datetime.now(timezone.utc).isoformat(),
-                        'interval_seconds': interval(now), 'managers': managers, 'fixtures': current_fixtures}
+                        'interval_seconds': interval(now), 'managers': managers, 'creators': creators,
+                        'player_points': points, 'fixtures': current_fixtures}
             write_json(LIVE / 'data/live.json', snapshot)
             # A rotating path avoids the raw-file CDN's five-minute cached copy.
             slot = int(datetime.now(timezone.utc).timestamp() // 60) % 10

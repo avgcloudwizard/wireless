@@ -257,6 +257,18 @@ def comparison_history(current, chips):
             'previous_overall_rank': before.get('overall_rank') if before else None,
             'previous_transfers': sum(r['event_transfers'] for r in current if r['event'] < public_gw and chips.get(r['event']) not in ('wildcard', 'freehit'))}
 
+def transfer_moves(entry, gw, elements, cache):
+    """Public transfers are fixed after a GW deadline; reuse within that GW."""
+    key = f'{entry}:{gw}'
+    if key not in cache:
+        payload = fetch(f'entry/{entry}/transfers/')
+        cache[key] = [{'gw': t['event'], 'in_id': t['element_in'], 'out_id': t['element_out'],
+                       'in': elements.get(t['element_in'], {}).get('web_name', str(t['element_in'])),
+                       'out': elements.get(t['element_out'], {}).get('web_name', str(t['element_out']))}
+                      for t in payload if t['event'] <= gw]
+    return cache[key]
+
+
 def creator_team(entry, gw, latest, elements, teams, live_cache, cache):
     """Only the latest public squad; checked squads are cached for one week."""
     if not gw:
@@ -275,6 +287,7 @@ def creator_team(entry, gw, latest, elements, teams, live_cache, cache):
         team = team_view(detail, elements, teams, live_cache[gw], gw, final)
         if not team or len(team['players']) != 15:
             raise ValueError('Incomplete public squad')
+        team['entry_history'] = picks.get('entry_history', {})
         team['updated_at'] = datetime.now(timezone.utc).isoformat()
         cache[str(entry)] = {'team': team, 'fetched_at': time.time()}
         return team
@@ -282,7 +295,7 @@ def creator_team(entry, gw, latest, elements, teams, live_cache, cache):
         print(f'Creator squad unavailable for {entry}: {type(exc).__name__}; keeping previous squad if available.', file=sys.stderr)
         return {**previous, 'stale': True} if previous else None
 
-def update_creators(season, latest, cap, total_events, elements=None, teams=None, live_cache=None, team_cache=None):
+def update_creators(season, latest, cap, total_events, elements=None, teams=None, live_cache=None, team_cache=None, transfer_cache=None):
     live_cache = live_cache if live_cache is not None else {}
     team_cache = team_cache if team_cache is not None else {}
     roster = json.loads((ROOT / 'content-creators.json').read_text())
@@ -299,7 +312,11 @@ def update_creators(season, latest, cap, total_events, elements=None, teams=None
         latest_row = next((r for r in current if r['event'] == latest), None)
         public_gw = max((r['event'] for r in current), default=0)
         public_team = creator_team(entry, public_gw, latest, elements, teams, live_cache, team_cache) if elements else None
-        managers.append({'public_team': public_team, 'id': entry, 'creator': True, 'name': creator['name'], 'team': profile['name'],
+        try:
+            moves = transfer_moves(entry, public_gw, elements or {}, transfer_cache if transfer_cache is not None else {})
+        except Exception:
+            moves = None
+        managers.append({'transfer_moves': moves, 'public_team': public_team, 'id': entry, 'creator': True, 'name': creator['name'], 'team': profile['name'],
                          'total': profile['summary_overall_points'], 'live_rank': profile['summary_overall_rank'],
                          'latest_score': latest_row['points'] - latest_row['event_transfers_cost'] if latest_row else None,
                          'ft': free_transfers(current, chips, cap), 'ft_cap': cap,
@@ -423,8 +440,13 @@ def main():
                     public_team['entry_history'] = picks.get('entry_history', {}) if team_gw not in completed_ids else latest_history
             except Exception:
                 warnings.append(f'Public team details unavailable for {s["entry_name"]}.')
+        try:
+            moves = transfer_moves(entry, team_gw, elements, cache.setdefault('transfer_moves', {}))
+        except Exception:
+            moves = None
+            warnings.append(f'Transfer details unavailable for {s["entry_name"]}.')
         mvp, mvp_coverage = manager_mvp(rows, details, entry, elements, teams)
-        managers.append({'id': entry, 'name': s['player_name'], 'team': s['entry_name'],
+        managers.append({'transfer_moves': moves, 'id': entry, 'name': s['player_name'], 'team': s['entry_name'],
                          'rank': s['rank'], 'total': s['total'], 'event_total': s['event_total'],
                          'movement': s['last_rank'] - s['rank'] if s.get('last_rank') else None,
                          'live_rank': entry_data.get('summary_overall_rank'),
@@ -478,7 +500,7 @@ def main():
         warnings.append('Fixture refresh failed; previous matchday schedule retained.')
     creators = None
     try:
-        creators = update_creators(season, latest, ft_cap, len(bootstrap['events']), elements, teams, live_cache, cache.setdefault('creator_teams', {}))
+        creators = update_creators(season, latest, ft_cap, len(bootstrap['events']), elements, teams, live_cache, cache.setdefault('creator_teams', {}), cache.setdefault('transfer_moves', {}))
     except Exception as exc:
         previous_path = ROOT / 'data/league.json'
         previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
@@ -496,6 +518,7 @@ def main():
             'current_deadline': active['deadline_time'] if active else None,
             'in_progress': bool(active and active['id'] not in completed_ids),
             'regrets': regrets, 'prices': price_watch(bootstrap), 'refresh_minutes_matchday': config.get('matchday_minutes', 15),
+            'player_points': live_cache.get(active['id'], {}) if active else {},
             'live_fixtures': live_fixtures, 'fixtures_stale': fixtures_stale,
             'fixture_kickoffs': fixture_kickoffs, 'prizes': prizes, 'creators': creators,
             'warnings': warnings, 'managers': managers, 'gameweeks': gameweeks, 'months': monthly}

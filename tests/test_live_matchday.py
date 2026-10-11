@@ -12,8 +12,10 @@ class MatchdayTests(unittest.TestCase):
 
     def test_no_worker_for_finished_or_old_matches(self):
         now=datetime(2026,10,10,15,tzinfo=timezone.utc)
-        fixture={'kickoff_time':'2026-10-10T14:00:00Z','finished':False}
+        fixture={'kickoff_time':'2026-10-10T14:00:00Z','finished':False,'started':True}
         self.assertTrue(match_window([fixture],now))
+        self.assertFalse(match_window([{**fixture,'started':False}],now))
+        self.assertFalse(match_window([{**fixture,'kickoff_time':'2026-10-10T15:01:00Z'}],now))
         self.assertFalse(match_window([{**fixture,'finished':True}],now))
         self.assertFalse(match_window([{**fixture,'kickoff_time':'2026-10-10T09:00:00Z'}],now))
 
