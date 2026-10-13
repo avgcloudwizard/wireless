@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from update_fpl import fetch, squad_detail, team_view, write_json, transfer_moves
+from regrets import build_untouched_live
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE = ROOT / '.live'
@@ -127,7 +128,12 @@ def main():
                                  'home_score': f.get('team_h_score'), 'away_score': f.get('team_a_score'),
                                  'started': f.get('started', False), 'finished': f.get('finished', False),
                                  'kickoff': f.get('kickoff_time')} for f in fixtures if f.get('event') == event['id']]
-            snapshot = {'league_id': base['league_id'], 'season': base['season'], 'gw': event['id'],
+            try:
+                untouched = build_untouched_live(base.get('regrets'), event['id'], {p['id']: p['stats'] for p in live['elements']}, elements, fixtures, managers)
+            except Exception as exc:
+                untouched = None
+                print(f'UnTouched refresh unavailable; live scores continue: {type(exc).__name__}', flush=True)
+            snapshot = {'untouched': untouched, 'league_id': base['league_id'], 'season': base['season'], 'gw': event['id'],
                         'deadline': event['deadline_time'], 'updated_at': datetime.now(timezone.utc).isoformat(),
                         'interval_seconds': interval(now), 'managers': managers, 'creators': creators,
                         'player_points': points, 'fixtures': current_fixtures}

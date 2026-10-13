@@ -1,6 +1,7 @@
 """Public-data counterfactuals; no predictions or private team access."""
 from itertools import combinations
 import time
+from copy import deepcopy
 
 
 def original_lineup(detail):
@@ -13,19 +14,20 @@ def original_lineup(detail):
     return sorted(picks, key=lambda p: p['position'])
 
 
-def untouched_score(lineup, stats, roles):
+def untouched_score(lineup, stats, roles, pending=None):
     """Use original bench priority, legal formations and GW1 captain/vice."""
     if len(lineup) != 15 or any(p['element'] not in stats for p in lineup):
         raise ValueError('Incomplete frozen squad or player scores')
+    pending = set(pending or ())
     played = lambda pid: stats[pid]['minutes'] > 0 or stats[pid].get('red_cards', 0) > 0 or stats[pid].get('yellow_cards', 0) > 0
     starters = [p['element'] for p in lineup[:11]]
     bench = [p['element'] for p in lineup[11:]]
     gk = next(p for p in starters if roles[p] == 1)
     reserve = next(p for p in bench if roles[p] == 1)
     selected = starters[:]
-    if not played(gk) and played(reserve):
+    if not played(gk) and gk not in pending and played(reserve):
         selected[selected.index(gk)] = reserve
-    absent = [p for p in starters if roles[p] != 1 and not played(p)]
+    absent = [p for p in starters if roles[p] != 1 and not played(p) and p not in pending]
     available = [p for p in bench if roles[p] != 1 and played(p)]
     # Maximise legal subs, then prioritise the earliest bench players.
     found = False
@@ -43,7 +45,7 @@ def untouched_score(lineup, stats, roles):
             break
     captain = next(p['element'] for p in lineup if p['is_captain'])
     vice = next(p['element'] for p in lineup if p['is_vice_captain'])
-    captain = captain if played(captain) else vice if played(vice) else None
+    captain = captain if played(captain) or captain in pending else vice if played(vice) else None
     points = sum(stats[p]['total_points'] for p in selected)
     if captain in selected:
         points += stats[captain]['total_points']
@@ -111,7 +113,7 @@ def build_regrets(managers, details, elements, completed, cache, fetch):
         if 1 in ds and set(completed) == set(range(1, latest + 1)):
             lineup = original_lineup(ds[1])
             totals = [{'gw': gw, 'points': untouched_score(lineup, live[gw], roles)} for gw in sorted(completed)]
-            frozen = {'points': sum(r['points'] for r in totals), 'weeks': totals,
+            frozen = {'points': sum(r['points'] for r in totals), 'weeks': totals, 'lineup': lineup,
                       'captain': names[next(p['element'] for p in lineup if p['is_captain'])],
                       'vice': names[next(p['element'] for p in lineup if p['is_vice_captain'])]}
         transfers = fetch(f"entry/{m['id']}/transfers/")
@@ -133,3 +135,30 @@ def build_regrets(managers, details, elements, completed, cache, fetch):
                        'captains': sorted(candidates.values(), key=lambda c: (-c['delta'], c['name'])),
                        'bench': sorted(bench, key=lambda r: -r['gw']), 'receipts': receipts})
     return {'rows': result, 'through_gw': latest, 'stale': False}
+
+
+def build_untouched_live(regrets, gw, stats, elements, fixtures, managers):
+    """Extend the saved GW1 comparison once, using identical GW coverage on both sides."""
+    if not regrets or regrets.get('stale') or gw != regrets.get('through_gw', 0) + 1:
+        return None
+    roles = {pid: p['element_type'] for pid, p in elements.items()}
+    remaining_teams = {team for f in fixtures if f.get('event') == gw and not f.get('finished')
+                       for team in (f['team_h'], f['team_a'])}
+    pending = {pid for pid, p in elements.items() if p['team'] in remaining_teams}
+    by_id = {m['id']: m for m in managers}
+    rows = []
+    for saved in regrets['rows']:
+        frozen = saved.get('frozen')
+        m = by_id.get(saved['id'], {})
+        team = m.get('public_team') or {}
+        if not frozen or len(frozen.get('lineup', [])) != 15 or team.get('gw') != gw or team.get('stale') or not team.get('entry_history'):
+            return None
+        if len(team.get('players', [])) != 15 or any(p['id'] not in stats for p in team['players']):
+            return None
+        score = untouched_score(frozen['lineup'], stats, roles, pending)
+        updated = deepcopy(frozen)
+        updated['points'] += score
+        updated['weeks'].append({'gw': gw, 'points': score})
+        actual_gw = sum(stats[p['id']]['total_points'] * p['multiplier'] for p in team['players']) - team['entry_history'].get('event_transfers_cost', 0)
+        rows.append({'id': saved['id'], 'actual': saved['actual'] + actual_gw, 'frozen': updated})
+    return {'rows': rows, 'through_gw': gw, 'provisional': True, 'stale': False}

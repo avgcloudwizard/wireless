@@ -24,6 +24,30 @@ class FrozenSquadTests(unittest.TestCase):
         self.stats[5]['total_points']=8
         self.assertEqual(untouched_score(self.lineup,self.stats,self.roles),40)
 
+    def test_live_pending_starters_and_captain_wait_for_remaining_fixtures(self):
+        self.stats[1]={'minutes':0,'total_points':0}
+        self.stats[9]={'minutes':0,'total_points':0}
+        self.stats[12]['total_points']=6
+        self.stats[5]['total_points']=8
+        # Neither GK sub nor vice fallback happens while their clubs can still play.
+        self.assertEqual(untouched_score(self.lineup,self.stats,self.roles,{1,9}),24)
+        self.assertEqual(untouched_score(self.lineup,self.stats,self.roles,set()),40)
+
+    def test_live_comparison_extends_both_sides_once(self):
+        from scripts.regrets import build_untouched_live
+        saved={'through_gw':1,'rows':[{'id':1,'actual':30,'frozen':{'points':24,'weeks':[{'gw':1,'points':24}], 'lineup':self.lineup}}]}
+        elements={i:{'element_type':self.roles[i],'team':1} for i in self.stats}
+        team={'gw':2,'entry_history':{'event_transfers_cost':4},'players':[{'id':i,'multiplier':2 if i==9 else 1 if i<=11 else 0} for i in self.stats]}
+        managers=[{'id':1,'public_team':team}]
+        live=build_untouched_live(saved,2,self.stats,elements,[],managers)
+        self.assertEqual(live['through_gw'],2)
+        self.assertEqual(live['rows'][0]['frozen']['points'],48)
+        self.assertEqual(live['rows'][0]['actual'],50)
+        self.assertEqual(saved['rows'][0]['frozen']['points'],24)
+        self.assertEqual(build_untouched_live(saved,2,self.stats,elements,[],managers),live)
+        self.assertIsNone(build_untouched_live(saved,3,self.stats,elements,[],managers))
+        self.assertIsNone(build_untouched_live(live,2,self.stats,elements,[],managers))
+
     def test_blank_all_zero(self):
         self.stats={i:{'minutes':0,'total_points':0} for i in range(1,16)}
         self.assertEqual(untouched_score(self.lineup,self.stats,self.roles),0)

@@ -9,10 +9,10 @@ import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 try:
-    from .regrets import build_regrets
+    from .regrets import build_regrets, build_untouched_live
     from .season_model import forecast, calibrate_projections, award_months, prize_tracker
 except ImportError:
-    from regrets import build_regrets
+    from regrets import build_regrets, build_untouched_live
     from season_model import forecast, calibrate_projections, award_months, prize_tracker
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -376,6 +376,7 @@ def main():
         cache = {'season': season, 'league_id': league_id, 'details': {}}
     details = cache['details']
     live_cache, warnings, managers = {}, [], []
+    live_stats = {}
     latest = max(completed_ids, default=0)
     active = next((e for e in bootstrap['events'] if e['is_current']), None)
     for s in standings:
@@ -401,6 +402,7 @@ def main():
                     if gw not in live_cache:
                         live_data = fetch(f'event/{gw}/live/')
                         live_cache[gw] = {p['id']: p['stats']['total_points'] for p in live_data['elements']}
+                        live_stats[gw] = {p['id']: p['stats'] for p in live_data['elements']}
                     picks = fetch(f'entry/{entry}/event/{gw}/picks/')
                     detail = squad_detail(picks, live_cache[gw], players)
                     detail['fetched_at'] = time.time()
@@ -434,6 +436,7 @@ def main():
                     if team_gw not in live_cache:
                         live_data = fetch(f'event/{team_gw}/live/')
                         live_cache[team_gw] = {p['id']: p['stats']['total_points'] for p in live_data['elements']}
+                        live_stats[team_gw] = {p['id']: p['stats'] for p in live_data['elements']}
                     team_detail = squad_detail(picks, live_cache[team_gw], players)
                 public_team = team_view(team_detail, elements, teams, live_cache.get(team_gw, {}), team_gw, team_gw in completed_ids)
                 if public_team:
@@ -510,7 +513,14 @@ def main():
         warnings.append('Content Creator refresh failed; previous complete creator snapshot retained if available.')
         print(f'Creator update failed: {type(exc).__name__}: {exc}', file=sys.stderr)
     active = next((e for e in bootstrap['events'] if e['is_current']), None)
-    data = {'version': 1, 'league_id': league_id, 'name': league['name'],
+    untouched = None
+    if active and active['id'] not in completed_ids and not fixtures_stale:
+        try:
+            untouched = build_untouched_live(regrets, active['id'], live_stats.get(active['id'], {}), elements, fixtures, managers)
+        except Exception as exc:
+            warnings.append('Live UnTouched comparison unavailable; completed comparison retained.')
+            print(f'Live UnTouched unavailable: {type(exc).__name__}: {exc}', file=sys.stderr)
+    data = {'untouched': untouched, 'version': 1, 'league_id': league_id, 'name': league['name'],
             'season': f'{season}/{str(int(season)+1)[-2:]}',
             'updated_at': datetime.now(timezone.utc).isoformat(), 'refresh_hours': config['refresh_hours'],
             'latest_completed': latest or None, 'completed_count': len(completed),
