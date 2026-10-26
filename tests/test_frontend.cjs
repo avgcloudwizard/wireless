@@ -4,7 +4,7 @@ const ctx=vm.createContext({console,structuredClone});vm.runInContext(source,ctx
 const snapshot=JSON.parse(fs.readFileSync('data/league.json'));
 ctx.snapshot=snapshot;vm.runInContext('data=snapshot',ctx);
 for(const page of ['home','season','gameweeks','monthly','predictions','prices','creators','enemies','untouched','maccapanti','money','drama'])assert(vm.runInContext(page+'()',ctx).length>0,page+' renders');
-if(snapshot.in_progress)assert(vm.runInContext('home()',ctx).includes('GW '+snapshot.current_gw+' live'));
+if(snapshot.in_progress)assert(vm.runInContext('home()',ctx).includes('GW '+snapshot.current_gw+' '+vm.runInContext('currentGWStatus()',ctx)));
 if(snapshot.in_progress)assert(vm.runInContext('monthly()',ctx).includes(new Intl.DateTimeFormat('en-GB',{month:'long',year:'numeric',timeZone:'Europe/London'}).format(new Date(snapshot.current_deadline))));
 const m=snapshot.managers.find(m=>m.id===61950);
 ctx.m=m;assert(Number.isFinite(vm.runInContext('teamValue(m)',ctx)));
@@ -29,6 +29,15 @@ if(ctx.snapshot.in_progress){
   assert.equal(s.latest_score,live.net);assert(s.power>=0&&s.power<=100);
  }
  assert.equal(JSON.stringify(vm.runInContext('seasonManagers()',ctx)),JSON.stringify(updated),'Repeated renders do not accumulate the live GW');
- assert(vm.runInContext('season()',ctx).includes('GW '+ctx.snapshot.current_gw+' live'));
+ assert(vm.runInContext('season()',ctx).includes('GW '+ctx.snapshot.current_gw+' '+vm.runInContext('currentGWStatus()',ctx)));
 }
 console.log('Season live totals are repeatable; historical data stays unchanged.');
+
+// Finished fixtures change labels without finalising unverified FPL records.
+vm.runInContext("data.in_progress=true;data.fixtures_stale=false;data.live_fixtures=[{gw:data.current_gw,finished:true}]",ctx);
+assert.equal(vm.runInContext('currentGWStatus()',ctx),'finished');
+assert(vm.runInContext('scoreHeading()',ctx).includes('finished'));
+vm.runInContext('data.live_fixtures[0].finished=false',ctx);
+assert.equal(vm.runInContext('currentGWStatus()',ctx),'live');
+vm.runInContext('data.live_fixtures=[]',ctx);
+assert.equal(vm.runInContext('currentGWStatus()',ctx),'live');
