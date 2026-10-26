@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
-from scripts.update_fpl import (build_stats, captain_detail, normalize, write_json, main,
+from scripts.update_fpl import (statistical_events, build_stats, captain_detail, normalize, write_json, main,
                                free_transfers, squad_detail, manager_mvp, price_watch, scoring_awards, update_creators, team_view, creator_team)
 
 from scripts.season_model import forecast, calibrate_projections, remaining_chips, prize_tracker, award_months
@@ -19,6 +19,18 @@ def events():
     return [{'id':1,'month':'2026-08'},{'id':2,'month':'2026-09'}]
 
 class ScoringTests(unittest.TestCase):
+    def test_finished_fixtures_include_stats_without_claiming_final_checks(self):
+        events = [{'id':1,'finished':True,'data_checked':True},
+                  {'id':2,'finished':False,'data_checked':False},
+                  {'id':3,'finished':False,'data_checked':False},
+                  {'id':4,'finished':False,'data_checked':False}]
+        fixtures = [{'event':2,'finished':True}, {'event':2,'finished':True},
+                    {'event':3,'finished':True}, {'event':3,'finished':False}]
+        included, pending = statistical_events(events, fixtures)
+        self.assertEqual([e['id'] for e in included], [1,2])
+        self.assertEqual(pending, [2])
+        self.assertEqual(statistical_events(events, None), ([events[0]], []))
+
     def test_hits_ties_months_and_unfinished_projection(self):
         ms=[manager(1,[score(1,50),score(2,64,4,110)]),manager(2,[score(1,50),score(2,60,0,110)])]
         gws,months=build_stats(ms,events(),38)

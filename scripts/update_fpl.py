@@ -295,7 +295,7 @@ def creator_team(entry, gw, latest, elements, teams, live_cache, cache):
         print(f'Creator squad unavailable for {entry}: {type(exc).__name__}; keeping previous squad if available.', file=sys.stderr)
         return {**previous, 'stale': True} if previous else None
 
-def update_creators(season, latest, cap, total_events, elements=None, teams=None, live_cache=None, team_cache=None, transfer_cache=None):
+def update_creators(season, latest, cap, total_events, elements=None, teams=None, live_cache=None, team_cache=None, transfer_cache=None, latest_checked=None):
     live_cache = live_cache if live_cache is not None else {}
     team_cache = team_cache if team_cache is not None else {}
     roster = json.loads((ROOT / 'content-creators.json').read_text())
@@ -311,7 +311,7 @@ def update_creators(season, latest, cap, total_events, elements=None, teams=None
         chips = {c['event']: c['name'] for c in history.get('chips', [])}
         latest_row = next((r for r in current if r['event'] == latest), None)
         public_gw = max((r['event'] for r in current), default=0)
-        public_team = creator_team(entry, public_gw, latest, elements, teams, live_cache, team_cache) if elements else None
+        public_team = creator_team(entry, public_gw, latest if latest_checked is None else latest_checked, elements, teams, live_cache, team_cache) if elements else None
         try:
             moves = transfer_moves(entry, public_gw, elements or {}, transfer_cache if transfer_cache is not None else {})
         except Exception:
@@ -347,6 +347,20 @@ def team_view(detail, elements, teams, live, gw, final):
          'earned': live[p['element']] * p['multiplier'] if p['element'] in live else None}
         for p in sorted(picks, key=lambda p: p['position']) if p['element'] in elements]}
 
+def statistical_events(events, fixtures):
+    """Include played-out GWs; official check flags still govern final awards."""
+    included, pending = [], []
+    for event in events:
+        checked = event.get('finished') and event.get('data_checked')
+        matches = [f for f in (fixtures or []) if f.get('event') == event['id']]
+        played_out = bool(matches) and all(f.get('finished') for f in matches)
+        if checked or played_out:
+            included.append(event)
+            if not checked:
+                pending.append(event['id'])
+    return included, pending
+
+
 def main():
     config = json.loads((ROOT / 'config.json').read_text())
     league_id = int(config['league_id'])
@@ -365,8 +379,13 @@ def main():
             break
         page += 1
     start = league.get('start_event', 1)
-    completed = [e for e in bootstrap['events'] if e['finished'] and e['data_checked']]
-    events = [{'id': e['id'], 'deadline': e['deadline_time'],
+    try:
+        fixtures = fetch('fixtures/')
+    except Exception:
+        fixtures = None
+    checked_ids = {e['id'] for e in bootstrap['events'] if e['finished'] and e['data_checked']}
+    completed, pending_checks = statistical_events(bootstrap['events'], fixtures)
+    events = [{'id': e['id'], 'checks_pending': e['id'] in pending_checks, 'deadline': e['deadline_time'],
                'month': datetime.fromisoformat(e['deadline_time'].replace('Z', '+00:00')).astimezone(ZoneInfo('Europe/London')).strftime('%Y-%m')}
               for e in completed if e['id'] >= start]
     completed_ids = {e['id'] for e in completed}
@@ -438,7 +457,7 @@ def main():
                         live_cache[team_gw] = {p['id']: p['stats']['total_points'] for p in live_data['elements']}
                         live_stats[team_gw] = {p['id']: p['stats'] for p in live_data['elements']}
                     team_detail = squad_detail(picks, live_cache[team_gw], players)
-                public_team = team_view(team_detail, elements, teams, live_cache.get(team_gw, {}), team_gw, team_gw in completed_ids)
+                public_team = team_view(team_detail, elements, teams, live_cache.get(team_gw, {}), team_gw, team_gw in checked_ids)
                 if public_team:
                     public_team['entry_history'] = picks.get('entry_history', {}) if team_gw not in completed_ids else latest_history
             except Exception:
@@ -487,7 +506,8 @@ def main():
         if m.get('ft_gw'):
             m['overall_movement_gw'] = m['ft_gw'] - 1
     try:
-        fixtures = fetch('fixtures/')
+        if fixtures is None:
+            raise ValueError('Fixture request failed')
         fixture_kickoffs = [f['kickoff_time'] for f in fixtures if f.get('kickoff_time')]
         live_fixtures = [{'id': f['id'], 'gw': f.get('event'), 'home': teams.get(f['team_h'], '?'),
                           'away': teams.get(f['team_a'], '?'), 'home_score': f.get('team_h_score'),
@@ -504,7 +524,7 @@ def main():
         warnings.append('Fixture refresh failed; previous matchday schedule retained.')
     creators = None
     try:
-        creators = update_creators(season, latest, ft_cap, len(bootstrap['events']), elements, teams, live_cache, cache.setdefault('creator_teams', {}), cache.setdefault('transfer_moves', {}))
+        creators = update_creators(season, latest, ft_cap, len(bootstrap['events']), elements, teams, live_cache, cache.setdefault('creator_teams', {}), cache.setdefault('transfer_moves', {}), latest_checked=max(checked_ids, default=0))
     except Exception as exc:
         previous_path = ROOT / 'data/league.json'
         previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
@@ -523,7 +543,7 @@ def main():
     data = {'untouched': untouched, 'version': 1, 'league_id': league_id, 'name': league['name'],
             'season': f'{season}/{str(int(season)+1)[-2:]}',
             'updated_at': datetime.now(timezone.utc).isoformat(), 'refresh_hours': config['refresh_hours'],
-            'latest_completed': latest or None, 'completed_count': len(completed),
+            'latest_completed': latest or None, 'completed_count': len(completed), 'pending_checks': pending_checks,
             'total_gameweeks': len(bootstrap['events']),
             'current_gw': active['id'] if active else None,
             'current_deadline': active['deadline_time'] if active else None,
