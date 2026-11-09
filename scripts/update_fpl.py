@@ -165,6 +165,7 @@ def scoring_awards(history, details, entry):
             'hauls': hauls if complete else None, 'awards_coverage': coverage}
 
 def build_stats(managers, events, total_events, start_event=1, chip_definitions=None, latest_completed=None):
+    rank_record_gws = {e['id'] for e in events if not e.get('checks_pending')}
     completed_ids = [e['id'] for e in events]
     by_gw = []
     previous = {}
@@ -199,7 +200,8 @@ def build_stats(managers, events, total_events, start_event=1, chip_definitions=
         # Official current total may include an unfinished GW. Do not project it twice.
         completed_total = hist[-1]['total'] if hist else 0
         projection = forecast(m, total_events, latest_completed if latest_completed is not None else (last_id or 0), chip_definitions or [])
-        gw_ranks = [r['overall_gw_rank'] for r in hist if r.get('overall_gw_rank')]
+        ranked_history = [r for r in hist if r['gw'] in rank_record_gws and (r.get('overall_gw_rank') or 0) > 0]
+        gw_ranks = [r['overall_gw_rank'] for r in ranked_history]
         best_gw_rank = min(gw_ranks, default=None)
         worst_gw_rank = max(gw_ranks, default=None)
         momentum = positions[-min(5, len(positions))]['league_rank'] - positions[-1]['league_rank'] if positions else 0
@@ -215,8 +217,8 @@ def build_stats(managers, events, total_events, start_event=1, chip_definitions=
                  biggest_rise=max([r['movement'] or 0 for r in positions] + [0]),
                  latest_score=last['net'] if last else None, momentum=momentum,
                  completed_total=completed_total, **projection,
-                 worst_gw_rank=worst_gw_rank, worst_gw_rank_gws=[r['gw'] for r in hist if worst_gw_rank and r.get('overall_gw_rank') == worst_gw_rank],
-                 best_gw_rank=best_gw_rank, best_gw_rank_gws=[r['gw'] for r in hist if best_gw_rank and r.get('overall_gw_rank') == best_gw_rank])
+                 worst_gw_rank=worst_gw_rank, worst_gw_rank_gws=[r['gw'] for r in ranked_history if r['overall_gw_rank'] == worst_gw_rank],
+                 best_gw_rank=best_gw_rank, best_gw_rank_gws=[r['gw'] for r in ranked_history if r['overall_gw_rank'] == best_gw_rank])
     eligible = [m for m in managers if m['average'] is not None]
     for m in managers:
         if m not in eligible:

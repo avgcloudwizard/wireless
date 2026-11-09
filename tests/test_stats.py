@@ -19,6 +19,20 @@ def events():
     return [{'id':1,'month':'2026-08'},{'id':2,'month':'2026-09'}]
 
 class ScoringTests(unittest.TestCase):
+    def test_rank_records_wait_for_final_checks(self):
+        weeks = events() + [{'id':3,'month':'2026-09','checks_pending':True}]
+        history = [{**score(i,50), 'overall_gw_rank':rank} for i,rank in enumerate([80000,90000,20000],1)]
+        m = manager(1,history)
+        for rank in (20000,80000,100000):
+            history[-1]['overall_gw_rank'] = rank
+            build_stats([m],weeks,38)
+            self.assertEqual((m['best_gw_rank'], m['best_gw_rank_gws']), (80000,[1]))
+            self.assertEqual((m['worst_gw_rank'], m['worst_gw_rank_gws']), (90000,[2]))
+        weeks[-1]['checks_pending'] = False
+        history[-1]['overall_gw_rank'] = 50000
+        build_stats([m],weeks,38)
+        self.assertEqual((m['best_gw_rank'],m['best_gw_rank_gws']), (50000,[3]))
+
     def test_finished_fixtures_include_stats_without_claiming_final_checks(self):
         events = [{'id':1,'finished':True,'data_checked':True},
                   {'id':2,'finished':False,'data_checked':False},

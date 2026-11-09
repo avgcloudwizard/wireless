@@ -23,8 +23,10 @@ console.log('All 12 pages render; current scores, month, value and transfer rece
 // Season adds the provisional GW exactly once and leaves stored records untouched.
 ctx.snapshot=JSON.parse(fs.readFileSync('data/league.json'));vm.runInContext('data=snapshot',ctx);
 if(ctx.snapshot.in_progress){
+ for(const m of ctx.snapshot.managers)if(m.public_team?.entry_history)m.public_team.entry_history.rank=1;
  const week=vm.runInContext('liveWeek()',ctx),updated=vm.runInContext('seasonManagers()',ctx);
  for(const m of ctx.snapshot.managers){const live=week.rows.find(r=>r.id===m.id),s=updated.find(r=>r.id===m.id);if(!live)continue;
+  assert.equal(s.best_gw_rank,m.best_gw_rank);assert.deepEqual(s.best_gw_rank_gws,m.best_gw_rank_gws);
   assert.equal(s.bench,m.bench+live.bench);assert.equal(s.hits,m.hits+live.hits);assert.equal(s.wins,m.wins+(live.gw_rank===1?1:0));
   assert.equal(s.latest_score,live.net);assert(s.power>=0&&s.power<=100);
  }
